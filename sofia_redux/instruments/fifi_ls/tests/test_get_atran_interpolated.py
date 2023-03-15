@@ -2,13 +2,16 @@
 
 import os
 import pytest
+import sys
 import time
 
 import numpy as np
 import matplotlib.pyplot as plt
 from astropy.io import fits
 
+#from sofia_redux.instruments.fifi_ls.get_atran import get_atran_interpolated
 
+sys.path.append("..")
 from get_atran import get_atran_interpolated
 
 from tests.resources import FIFITestCase, get_scm_files
