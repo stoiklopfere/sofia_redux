@@ -310,7 +310,8 @@ def fit_data(data, s2n=10, threshold=5, allow_zero_variance=True,
     -------
     numpy.ndarray, numpy.ndarray
         flux and standard deviation arrays of size (spexel, spaxel)
-        or (16, 25) for FIFI-LS.
+        or (16, 25) for FIFI-LS chopped observations. For OTF, the size
+        is (ramps/spaxel, spexel, spaxel)
     """
 
     maxidx = bn.nanargmax(data, axis=1)
@@ -335,9 +336,23 @@ def fit_data(data, s2n=10, threshold=5, allow_zero_variance=True,
     if average_ramps:
         return flux, np.sqrt(mvar)
     else:
-        # still flag outliers
+        # data.shape : (ramps/spaxel, ramplength, nwave(16), ns(slopespaxel(25))
+        #ramps_per_spaxel, nramp, nwave, nspaxel = data.shape      
+        
+          
+        # flag outliers from meancomb before calculating the variance
         slopes[~info['mask']] = np.nan
         var[~info['mask']] = np.nan
+
+        # Calculate variance over slopes
+        svar = np.nanvar(slopes,0)                      #axis 0: ramps per spaxel
+        np.nan_to_num(svar, copy=False, nan=0.0)
+        for k in numba.prange(data.shape[0]):           #prange: loop can be parallised 
+            for i in range(data.shape[2]):
+                for j in range(data.shape[3]):
+                   var[k,i,j] = np.sqrt((var[k,i,j] * var[k,i,j]) + (svar[i,j] * svar[i,j]))
+                         
+
         return slopes, np.sqrt(var)
 
 
@@ -408,6 +423,7 @@ def process_extension(hdu, readout_range, threshold=5,
     nread = readout_range[1]
 
     # fit slopes to ramps, average if desired
+    # Different dimensions for different OBS Modes!!!
     flux, stddev = fit_data(flux, s2n=s2n, threshold=threshold,
                             average_ramps=average_ramps,
                             bad_ramps=bad_ramps)
@@ -450,7 +466,7 @@ def process_extension(hdu, readout_range, threshold=5,
                      'UNIX time of last ramp [s]')
 
             # new table with only good ramp-averaged position data
-            # todo: consider averaging spatially local ramps as well
+            # todo: consider averaging spatially local ramps as well -> Christian says don't do it
             pdata = Table()
             for name in ['DLAM_MAP', 'DBET_MAP']:
                 reshaped = posdata[name].reshape(newshape)
