@@ -4,7 +4,8 @@ import os
 
 from astropy import log
 from astropy.io import fits
-from astropy.time import Time
+from astropy.time import Time, TimeUnix, TimeDelta
+from astropy import units as u
 import numba as nb
 import numpy as np
 from pandas import DataFrame
@@ -15,6 +16,7 @@ from sofia_redux.toolkit.interpolate \
 from sofia_redux.toolkit.utilities \
     import (hdinsert, gethdul, write_hdul)
 
+import datetime
 
 __all__ = ['classify_files', 'combine_extensions', 'combine_nods']
 
@@ -23,6 +25,14 @@ def _mjd(dateobs):
     """Get the MJD from a DATE-OBS."""
     try:
         mean_time = Time(dateobs).mjd
+    except (ValueError, AttributeError):
+        mean_time = 0
+    return mean_time
+
+def _unix(dateobs):
+    """Get the Unix Time from a DATE-OBS."""
+    try:
+        mean_time = Time(dateobs).unix
     except (ValueError, AttributeError):
         mean_time = 0
     return mean_time
@@ -82,7 +92,8 @@ def classify_files(filenames, offbeam=False):
         return None
 
     keywords = ['nodstyle', 'detchan', 'channel', 'nodbeam', 'dlam_map',
-                'dbet_map', 'dlam_off', 'dbet_off', 'date-obs']
+                'dbet_map', 'dlam_off', 'dbet_off', 'date-obs',
+                'C_CHOPLN','C_CYC_B','C_CYC_R']
 
     init = dict((key, [_from_hdul(hdul, key) for hdul in hduls])
                 for key in keywords)
@@ -100,7 +111,7 @@ def classify_files(filenames, offbeam=False):
     init['chdul'] = [None] * n
     init['combined'] = [np.full(len(x), False) for x in init['indpos']]
     init['outfile'] = [''] * n
-
+    init['C_CYC'] = [0.0] * n
     df = DataFrame(init, index=filenames)
 
     # If any files are asymmetric, treat them all as asymmetric
@@ -119,6 +130,8 @@ def classify_files(filenames, offbeam=False):
     # then set channel to either 1 (BLUE) or 0 (RED)
     valid_detchan = (df['detchan'] != 0) & (df['detchan'] != '0')
     df['channel'] = np.where(valid_detchan, df['detchan'], df['channel'])
+    # Get chop cycle depending on red or blue chanel
+    df['C_CYC'] = np.where(df['channel'] == 'BLUE', df['C_CYC_B'], df['C_CYC_R'])
     df['channel'] = df['channel'].apply(lambda x: 1 if x == 'BLUE' else 0)
 
     # update headers if offbeam is True
@@ -237,7 +250,14 @@ def combine_extensions(df, b_nod_method='nearest'):
     elif len(alist) == 0:
         log.error('No A nods found')
         return df
+    
+    # write times to csv
+    # create a list of headers
+          
+    headers = ['afile','aidx', 'apos','a_dateobs' ,'atime_first', 'atime_last','bfile1','b1_dateobs','btime1','bfile2','b2_dateobs','btime2','diff_before','diff_after']     
 
+    values = np.zeros((0,len(headers)))
+    
     for afile, arow in alist.iterrows():
 
         asymmetric = arow['asymmetric']
@@ -316,23 +336,14 @@ def combine_extensions(df, b_nod_method='nearest'):
                     # add in header for combination
                     b2_hdr = brow2['hdul'][0].header
                     combine_headers.append(b2_hdr)
-
-                    # get A and B times
-                    try:
-                        # unix time at middle of exposure
-                        atime = a_hdr['START'] \
-                            + a_hdr['FIFISTRT'] * a_hdr['ALPHA'] \
-                            + a_hdr['EXPTIME'] / 2.0
-                        btime1 = b_hdr['START'] \
-                            + b_hdr['FIFISTRT'] * b_hdr['ALPHA'] \
-                            + b_hdr['EXPTIME'] / 2.0
-                        btime2 = b2_hdr['START'] \
-                            + b2_hdr['FIFISTRT'] * b2_hdr['ALPHA'] \
-                            + b2_hdr['EXPTIME'] / 2.0
-                    except KeyError:
-                        raise ValueError('Missing START, FIFISTRT, ALPHA, '
-                                         'or EXPTIME keys in headers.')
-
+                  
+                    atime = _unix(a_hdr['date-obs']) \
+                        + (aidx + 0.5)*((a_hdr['C_CHOPLN']*2/250)*arow['C_CYC'])
+                    btime1 = _unix(b_hdr['date-obs']) \
+                        + (aidx + 0.5)*((b_hdr['C_CHOPLN']*2/250)*brow['C_CYC'])
+                    btime2 = _unix(b2_hdr['date-obs']) \
+                        + (aidx + 0.5)*((b2_hdr['C_CHOPLN']*2/250)*brow2['C_CYC'])
+               
                     # get index for second B row
                     bgidx2 = np.nonzero(bidx2)[0][0]
                     brow2['combined'][bgidx2] = True
@@ -361,10 +372,21 @@ def combine_extensions(df, b_nod_method='nearest'):
                             ramp_incr = (rampend - rampstart) / (nramp - 1)
                             atime = np.full(nramp, rampstart)
                             atime += np.arange(nramp, dtype=float) * ramp_incr
+
                         else:
                             atime = np.array([atime])
+                        print('atime_final',atime)
                         btime = np.array([btime1, btime2])
-
+                        #headers = ['afile','aidx', 'apos','a_dateobs' ,'atime_first', 'atime_last',
+                        #   'bfile1','b1_dateobs','btime1','bfile2','b2_dateobs','btime2','diff_before','diff_after']       
+                        values_i=([afile,aidx,apos,arow['date-obs'],
+                                       datetime.datetime.utcfromtimestamp(atime[0]),
+                                       datetime.datetime.utcfromtimestamp(atime[-1]),                                       
+                                       bfile,brow['date-obs'],datetime.datetime.utcfromtimestamp(btime1),
+                                       bfile2,brow2['date-obs'],datetime.datetime.utcfromtimestamp(btime2),
+                                       abs(atime[0]-btime1),abs(atime[-1]-btime2)])
+                        values = np.vstack([values,values_i])
+   
                         # interpolate B flux to A time
                         b_fname = f'FLUX_G{bgidx2}'
                         b_sname = f'STDDEV_G{bgidx2}'
@@ -450,7 +472,13 @@ def combine_extensions(df, b_nod_method='nearest'):
 
         if combined_hdul is not None:
             df.at[afile, 'chdul'] = combined_hdul
+   
+    filename = 'values.csv'
 
+    if os.path.exists(filename):
+        os.remove(filename)
+  
+    DataFrame(values).to_csv(filename,header=headers)
     return df
 
 
@@ -568,4 +596,4 @@ def combine_nods(filenames, offbeam=False, b_nod_method='nearest',
             df.at[filename, 'outfile'] = os.path.join(
                 outdir, os.path.basename(row['outfile']))
 
-    return df
+    return df    
