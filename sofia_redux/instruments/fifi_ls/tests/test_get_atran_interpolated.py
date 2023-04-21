@@ -12,9 +12,9 @@ from astropy.io import fits
 #from sofia_redux.instruments.fifi_ls.get_atran import get_atran_interpolated
 
 sys.path.append("..")
-from get_atran import get_atran_interpolated
+from sofia_redux.instruments.fifi_ls.get_atran import get_atran_interpolated
 
-from tests.resources import FIFITestCase, get_scm_files
+from sofia_redux.instruments.fifi_ls.tests.resources import FIFITestCase, get_scm_files
 
 
 def test_get_atran_interpolated():
