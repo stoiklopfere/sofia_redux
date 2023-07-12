@@ -98,12 +98,13 @@ def classify_files(filenames, offbeam=False):
     init = dict((key, [_from_hdul(hdul, key) for hdul in hduls])
                 for key in keywords)
     init['mjd'] = [_mjd(dateobs) for dateobs in init['date-obs']]
+    init['unix'] = [_unix(dateobs) for dateobs in init['date-obs']]
 
     init['indpos'] = [_read_exthdrs(hdul, 'indpos', default=0)
                       for hdul in hduls]
     init['bglevl'] = [_read_exthdrs(hdul, 'bglevl_a', default=0)
                       for hdul in hduls]
-    init['asymmetric'] = [x in ['ASYMMETRIC', 'C2NC2']
+    init['asymmetric'] = [x in ['ASYMMETRIC', 'C2NC2']  # OTF: C2NC2"
                           for x in init['nodstyle']]
     init['tsort'] = [0.0] * n
     init['sky'] = [False] * n  # calculate later
@@ -251,12 +252,6 @@ def combine_extensions(df, b_nod_method='nearest'):
         log.error('No A nods found')
         return df
     
-    # write times to csv
-    # create a list of headers
-          
-    headers = ['afile','aidx', 'apos','a_dateobs' ,'atime_first', 'atime_last','bfile1','b1_dateobs','btime1','bfile2','b2_dateobs','btime2','diff_before','diff_after']     
-
-    values = np.zeros((0,len(headers)))
     
     for afile, arow in alist.iterrows():
 
@@ -375,17 +370,7 @@ def combine_extensions(df, b_nod_method='nearest'):
 
                         else:
                             atime = np.array([atime])
-                        print('atime_final',atime)
                         btime = np.array([btime1, btime2])
-                        #headers = ['afile','aidx', 'apos','a_dateobs' ,'atime_first', 'atime_last',
-                        #   'bfile1','b1_dateobs','btime1','bfile2','b2_dateobs','btime2','diff_before','diff_after']       
-                        values_i=([afile,aidx,apos,arow['date-obs'],
-                                       datetime.datetime.utcfromtimestamp(atime[0]),
-                                       datetime.datetime.utcfromtimestamp(atime[-1]),                                       
-                                       bfile,brow['date-obs'],datetime.datetime.utcfromtimestamp(btime1),
-                                       bfile2,brow2['date-obs'],datetime.datetime.utcfromtimestamp(btime2),
-                                       abs(atime[0]-btime1),abs(atime[-1]-btime2)])
-                        values = np.vstack([values,values_i])
    
                         # interpolate B flux to A time
                         b_fname = f'FLUX_G{bgidx2}'
@@ -472,13 +457,6 @@ def combine_extensions(df, b_nod_method='nearest'):
 
         if combined_hdul is not None:
             df.at[afile, 'chdul'] = combined_hdul
-   
-    filename = 'values.csv'
-
-    if os.path.exists(filename):
-        os.remove(filename)
-  
-    DataFrame(values).to_csv(filename,header=headers)
     return df
 
 
@@ -596,4 +574,4 @@ def combine_nods(filenames, offbeam=False, b_nod_method='nearest',
             df.at[filename, 'outfile'] = os.path.join(
                 outdir, os.path.basename(row['outfile']))
 
-    return df    
+    return df
