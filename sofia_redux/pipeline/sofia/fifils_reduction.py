@@ -442,6 +442,12 @@ class FIFILSReduction(Reduction):
         subtract_bias = param.get_value('subtract_bias')
         indpos_sigma = param.get_value('indpos_sigma')
         badpix_file = param.get_value('badpix_file')
+        full_ramps = param.get_value('full_ramps')
+        if full_ramps:
+            rmplngth = 27
+        else:
+            rmplngth = 2
+        
         if str(badpix_file).strip() == '':
             badpix_file = None
         if parallel:
@@ -454,7 +460,7 @@ class FIFILSReduction(Reduction):
                                 threshold=thresh, remove_first=remove,
                                 subtract_bias=subtract_bias,
                                 indpos_sigma=indpos_sigma,
-                                badpix_file=badpix_file)
+                                badpix_file=badpix_file, rmplngth=rmplngth)
         if not result:
             msg = 'Problem in fifi_ls.fit_ramps.'
             log.error(msg)
@@ -519,10 +525,11 @@ class FIFILSReduction(Reduction):
         save = param.get_value('save')
         offbeam = param.get_value('offbeam')
         b_nod_method = param.get_value('b_nod_method')
+        bg_scaling = param.get_value('bg_scaling')
 
         # this function returns a dataframe as the result
         result = combine_nods(self.input, write=False,
-                              offbeam=offbeam, b_nod_method=b_nod_method)
+                              offbeam=offbeam, b_nod_method=b_nod_method, bg_scaling=bg_scaling)
         if result is None or result.empty:
             msg = 'Problem in fifi_ls.combine_nods.'
             log.error(msg)
@@ -713,10 +720,18 @@ class FIFILSReduction(Reduction):
         cutoff = param.get_value('cutoff')
         atran_dir = param.get_value('atran_dir')
         use_wv = param.get_value('use_wv')
+        narrow = param.get_value('narrow')
+        hdr_ovr = param.get_value('hdr_ovr')
+        restwav = param.get_value('restwav')
+        redshift = param.get_value('redshift')
+    
+        if not hdr_ovr:
+            restwav = 0.0  # will be overwritten with header value
+            redshift = 0.0
         if parallel:
             jobs = self.max_cores
         else:
-            jobs = None
+            jobs = None 
 
         if str(atran_dir).strip() == '':
             atran_dir = None
@@ -727,7 +742,9 @@ class FIFILSReduction(Reduction):
         result = wrap_telluric_correct(self.input, write=False,
                                        jobs=jobs, allow_errors=True,
                                        atran_dir=atran_dir, cutoff=cutoff,
-                                       use_wv=use_wv, skip_corr=skip_tell)
+                                       use_wv=use_wv, skip_corr=skip_tell, narrow=narrow,
+                                       redshift=redshift, hdr_ovr=hdr_ovr,
+                                        restwav=restwav)
         if not result:
             msg = 'Problem in fifi_ls.telluric_correct.'
             log.error(msg)

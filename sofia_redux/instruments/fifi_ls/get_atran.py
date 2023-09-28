@@ -3,6 +3,7 @@
 import glob
 import os
 import re
+import warnings
 
 from astropy import log
 from astropy.io import fits
@@ -222,7 +223,8 @@ def get_atran(header, resolution=None, filename=None,
             log.warning('Using default ATRAN file.')
             use_wv = False
 
-        log.info(f'Alt, ZA, WV: {alt:.2f} {za:.2f} {wv:.2f}')
+            log.debug(f'Alt, ZA, WV: {alt:.2f} {za:.2f} {wv:.2f}')
+
         true_value = [alt, za, wv]
 
         if atran_dir is not None:
@@ -244,7 +246,6 @@ def get_atran(header, resolution=None, filename=None,
         wv_best_file = None
         overall_val = np.inf
         best_file = None
-
         for f in atran_files:
             # check for WV match
             match = regex2.match(os.path.basename(f))
@@ -275,10 +276,10 @@ def get_atran(header, resolution=None, filename=None,
                         best_file = f
 
         if use_wv and wv_best_file is not None:
-            log.info('Using nearest Alt/ZA/WV')
+            log.debug('Using nearest Alt/ZA/WV')
             filename = wv_best_file
         else:
-            log.info('Using nearest Alt/ZA')
+            log.debug('Using nearest Alt/ZA')
             filename = best_file
 
     if filename is None:
@@ -286,7 +287,7 @@ def get_atran(header, resolution=None, filename=None,
         return
 
     # Read the atran data from cache if possible
-    log.info(f'Using ATRAN file: {filename}')
+    log.debug(f'Using ATRAN file: {filename}')
     atrandata = get_atran_from_cache(filename, resolution)
     if atrandata is not None:
         atranfile, wave, unsmoothed, smoothed = atrandata
@@ -345,17 +346,29 @@ def get_atran_interpolated(header, resolution=None,
         alt = 0.5 * (alt_start + alt_end)
     alt /= 1000
 
-    # get water vapor
+    # # get water vapor
+    # wv_obs = float(header.get('WVZ_OBS', 0))
+    # if wv_obs > 0:
+    #     wv = wv_obs
     wv_obs = float(header.get('WVZ_OBS', 0))
     if wv_obs > 0:
         wv = wv_obs
+    else:
+        wv_start = float(header.get('WVZ_STA', 0))
+        wv_end = float(header.get('WVZ_END', 0))
+        if wv_start > 0 >= wv_end:
+            wv = wv_start
+        elif wv_end > 0 >= wv_start:
+            wv = wv_end
+        else:
+            wv = 0.5 * (wv_start + wv_end)
 
     if use_wv and wv < 2:
         log.warning(f'Bad WV value: {wv}')
         log.warning('Using default ATRAN file.')
         use_wv = False
 
-    log.info(f'Alt, ZA, WV: {alt:.2f} {za:.2f} {wv:.2f}')
+    log.debug(f'Alt, ZA, WV: {alt:.2f} {za:.2f} {wv:.2f}')
     true_value = [alt, za, wv]
 
     if atran_dir is not None:
@@ -405,13 +418,13 @@ def get_atran_interpolated(header, resolution=None,
         _wv = value[2] # the WV value of this file
         
         
-        print(filename, ": Trying to load atran file")
+        #print(filename, ": Trying to load atran file")
 
         atrandata = get_atran_from_cache(filename, resolution)
 
         if atrandata is not None:
             #atranfile, wave, unsmoothed, smoothed = atrandata
-            print(filename, ": Succesfully loaded from cache")
+            #print(filename, ": Succesfully loaded from cache")
 
             atran_data[key] = atrandata, _za, _wv
         else:
@@ -421,7 +434,7 @@ def get_atran_interpolated(header, resolution=None,
                 return
             data = hdul[0].data
 
-            print(filename, ": loaded from hard disk")
+            #print(filename, ": loaded from hard disk")
 
             atranfile = os.path.basename(filename)
             wave = data[0]
@@ -433,7 +446,7 @@ def get_atran_interpolated(header, resolution=None,
             store_atran_in_cache(os.path.join(atran_dir, filename), resolution, atranfile,
                                 data[0], data[1], smoothed)
 
-    print("Atran files loaded")
+    #print("Atran files loaded")
 
     # interpolate za for two pwv
     za1_za2_wv1 = interpolate_two_atran_files(atran_data["za1_wv1"],
