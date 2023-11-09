@@ -311,7 +311,7 @@ def fit_data(data, s2n=10, threshold=5, allow_zero_variance=True,
         flux and standard deviation arrays of size (spexel, spaxel)
         or (16, 25) for FIFI-LS.
     """
-
+    print('FOOOOOOORKKKK')
     maxidx = bn.nanargmax(data, axis=1)
     if bad_ramps is not None:
         maxidx[bad_ramps] = -1
