@@ -3,6 +3,7 @@
 import glob
 import os
 import re
+import warnings
 
 from astropy import log
 from astropy.io import fits
@@ -15,7 +16,7 @@ from sofia_redux.spectroscopy.smoothres import smoothres
 
 
 __all__ = ['clear_atran_cache', 'get_atran_from_cache',
-           'store_atran_in_cache', 'get_atran']
+           'store_atran_in_cache', 'get_atran', 'get_atran_interpolated']
 
 __atran_cache = {}
 
@@ -222,7 +223,8 @@ def get_atran(header, resolution=None, filename=None,
             log.warning('Using default ATRAN file.')
             use_wv = False
 
-        log.info(f'Alt, ZA, WV: {alt:.2f} {za:.2f} {wv:.2f}')
+            log.debug(f'Alt, ZA, WV: {alt:.2f} {za:.2f} {wv:.2f}')
+
         true_value = [alt, za, wv]
 
         if atran_dir is not None:
@@ -244,7 +246,6 @@ def get_atran(header, resolution=None, filename=None,
         wv_best_file = None
         overall_val = np.inf
         best_file = None
-
         for f in atran_files:
             # check for WV match
             match = regex2.match(os.path.basename(f))
@@ -275,10 +276,10 @@ def get_atran(header, resolution=None, filename=None,
                         best_file = f
 
         if use_wv and wv_best_file is not None:
-            log.info('Using nearest Alt/ZA/WV')
+            log.debug('Using nearest Alt/ZA/WV')
             filename = wv_best_file
         else:
-            log.info('Using nearest Alt/ZA')
+            log.debug('Using nearest Alt/ZA')
             filename = best_file
 
     if filename is None:
@@ -286,7 +287,7 @@ def get_atran(header, resolution=None, filename=None,
         return
 
     # Read the atran data from cache if possible
-    log.info(f'Using ATRAN file: {filename}')
+    log.debug(f'Using ATRAN file: {filename}')
     atrandata = get_atran_from_cache(filename, resolution)
     if atrandata is not None:
         atranfile, wave, unsmoothed, smoothed = atrandata
@@ -311,3 +312,201 @@ def get_atran(header, resolution=None, filename=None,
     else:
         return (np.vstack((wave, smoothed)),
                 np.vstack((wave, unsmoothed)))
+
+def get_atran_interpolated(header, resolution=None,
+                          get_unsmoothed=False, use_wv=False,
+                          atran_dir=None):
+
+    if not isinstance(header, fits.Header):
+        log.error('Invalid header')
+        return
+
+    if resolution is None:
+        log.warning('Getting default resolution from G_WAVE in header')
+        resolution = get_resolution(header)
+
+    # get ZA
+    za_start = float(header.get('ZA_START', 0))
+    za_end = float(header.get('ZA_END', 0))
+    if za_start > 0 >= za_end:
+        za = za_start
+    elif za_end > 0 >= za_start:
+        za = za_end
+    else:
+        za = 0.5 * (za_start + za_end)
+
+    # get altitude in thousands feet
+    alt_start = float(header.get('ALTI_STA', 0))
+    alt_end = float(header.get('ALTI_END', 0))
+    if alt_start > 0 >= alt_end:
+        alt = alt_start
+    elif alt_end > 0 >= alt_start:
+        alt = alt_end
+    else:
+        alt = 0.5 * (alt_start + alt_end)
+    alt /= 1000
+
+    # # get water vapor
+    # wv_obs = float(header.get('WVZ_OBS', 0))
+    # if wv_obs > 0:
+    #     wv = wv_obs
+    wv_obs = float(header.get('WVZ_OBS', 0))
+    if wv_obs > 0:
+        wv = wv_obs
+    else:
+        wv_start = float(header.get('WVZ_STA', 0))
+        wv_end = float(header.get('WVZ_END', 0))
+        if wv_start > 0 >= wv_end:
+            wv = wv_start
+        elif wv_end > 0 >= wv_start:
+            wv = wv_end
+        else:
+            wv = 0.5 * (wv_start + wv_end)
+
+    if use_wv and wv < 2:
+        log.warning(f'Bad WV value: {wv}')
+        log.warning('Using default ATRAN file.')
+        use_wv = False
+
+    log.debug(f'Alt, ZA, WV: {alt:.2f} {za:.2f} {wv:.2f}')
+    true_value = [alt, za, wv]
+
+    if atran_dir is not None:
+        if not os.path.isdir(str(atran_dir)):
+            log.warning(f'Cannot find ATRAN directory: {atran_dir}')
+            log.warning('Using default ATRAN set.')
+            atran_dir = None
+    if atran_dir is None:
+        atran_dir = os.path.join(os.path.dirname(fifi_ls.__file__),
+                                    'data', 'atran_files')
+
+    za_values = list(range(30,75,5))
+    wv_values = [1, 2, 3, 4, 5, 6, 7,
+                8, 9, 10, 11, 12, 13,
+                14, 15, 16, 17, 18, 20,
+                22, 25, 27, 30, 32, 35,
+                37, 40, 45, 50]
+
+    za_high, za_low = np.inf, np.inf
+    wv_high, wv_low = np.inf, np.inf
+
+    # find the higher and lower boundaries
+    for i, w in enumerate(wv_values):
+        if w > wv:
+            wv_high = w
+            wv_low = wv_values[i-1]
+            break
+
+    for i, z in enumerate(za_values):
+        if z > za:
+            za_high = z
+            za_low = za_values[i-1]
+            break
+
+    # build filenames
+    current_atran_filenames = {}
+    current_atran_filenames["za1_wv1"] = ("atran_{}K_{}deg_{}pwv_40-300mum.fits".format(round(alt), za_low, wv_low), za_low, wv_low)
+    current_atran_filenames["za1_wv2"] = ("atran_{}K_{}deg_{}pwv_40-300mum.fits".format(round(alt), za_low, wv_high), za_low, wv_high)
+    current_atran_filenames["za2_wv1"] = ("atran_{}K_{}deg_{}pwv_40-300mum.fits".format(round(alt), za_high, wv_low), za_high, wv_low)
+    current_atran_filenames["za2_wv2"] = ("atran_{}K_{}deg_{}pwv_40-300mum.fits".format(round(alt), za_high, wv_high), za_high, wv_high)
+
+    # load all files
+    atran_data = {}
+    for key, value in current_atran_filenames.items():
+        filename = value[0]
+        _za = value[1] # the ZA value of this file
+        _wv = value[2] # the WV value of this file
+        
+        
+        #print(filename, ": Trying to load atran file")
+
+        atrandata = get_atran_from_cache(filename, resolution)
+
+        if atrandata is not None:
+            #atranfile, wave, unsmoothed, smoothed = atrandata
+            #print(filename, ": Succesfully loaded from cache")
+
+            atran_data[key] = atrandata, _za, _wv
+        else:
+            hdul = gethdul(os.path.join(atran_dir, filename), verbose=True)
+            if hdul is None or hdul[0].data is None:
+                log.error(f'Invalid data in ATRAN file {filename}')
+                return
+            data = hdul[0].data
+
+            #print(filename, ": loaded from hard disk")
+
+            atranfile = os.path.basename(filename)
+            wave = data[0]
+            unsmoothed = data[1]
+            smoothed = smoothres(data[0], data[1], resolution)
+
+            atran_data[key] = (atranfile, wave, unsmoothed, smoothed), _za, _wv
+
+            store_atran_in_cache(os.path.join(atran_dir, filename), resolution, atranfile,
+                                data[0], data[1], smoothed)
+
+    #print("Atran files loaded")
+
+    # interpolate za for two pwv
+    za1_za2_wv1 = interpolate_two_atran_files(atran_data["za1_wv1"],
+                                              atran_data["za2_wv1"],
+                                              za, 0)
+    
+    za1_za2_wv2 = interpolate_two_atran_files(atran_data["za1_wv2"],
+                                              atran_data["za2_wv2"],
+                                              za, 0)
+
+    # interpolate WV and hold ZA
+    interpolated = interpolate_two_atran_files(za1_za2_wv1, za1_za2_wv2, wv, 1)
+    
+    wave = interpolated[0][1]
+    unsmoothed = interpolated[0][2]
+    smoothed = smoothres(wave, unsmoothed, resolution)
+    
+    if not get_unsmoothed:
+        return np.vstack((wave, smoothed))
+    else:
+        return (np.vstack((wave, smoothed)),
+                np.vstack((wave, unsmoothed)))
+    
+def interpolate_two_atran_files(atran_data1, atran_data2, des_val, type=0) -> np.array:
+    """
+    Parameters
+    ----------
+    des_value : float
+        The value your interpolating for. Can be zenith angle (ZA) or water vapor (WV)
+    type: int
+        0 for ZA
+        1 for WV
+    """
+    
+    return_value = [["", atran_data1[0][1], np.ndarray, np.ndarray], 0, 0]
+    dy = atran_data2[0][2] - atran_data1[0][2]
+    
+    if type == 0:
+        # interpolating zenith angle
+        dx = atran_data2[1] - atran_data1[1]
+        t = dy/dx
+        data_int = atran_data1[0][2] + t * (des_val - atran_data1[1])
+        
+        return_value[0][2] = data_int
+        return_value[1] = des_val
+        return_value[2] = atran_data1[2]
+    elif type == 1:
+        # interpolating water vapor
+        dx = atran_data2[2] - atran_data1[2]
+        t = dy/dx
+        data_int = atran_data1[0][2] + t * (des_val - atran_data1[2])
+        
+        return_value[0][2] = data_int
+        return_value[1] = atran_data1[1]
+        return_value[2] = des_val
+    else:
+        raise TypeError("type has to be either 0 (ZA) or 1 (WV)")
+         
+    return return_value
+    
+    
+    
+    

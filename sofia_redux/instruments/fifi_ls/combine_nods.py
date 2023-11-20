@@ -8,6 +8,7 @@ from astropy.time import Time
 import numba as nb
 import numpy as np
 from pandas import DataFrame
+import pandas as pd
 
 from sofia_redux.instruments.fifi_ls.make_header import make_header
 from sofia_redux.toolkit.interpolate \
@@ -23,6 +24,14 @@ def _mjd(dateobs):
     """Get the MJD from a DATE-OBS."""
     try:
         mean_time = Time(dateobs).mjd
+    except (ValueError, AttributeError):
+        mean_time = 0
+    return mean_time
+
+def _unix(dateobs):
+    """Get the Unix Time from a DATE-OBS."""
+    try:
+        mean_time = Time(dateobs).unix
     except (ValueError, AttributeError):
         mean_time = 0
     return mean_time
@@ -100,7 +109,9 @@ def classify_files(filenames, offbeam=False):
     init['chdul'] = [None] * n
     init['combined'] = [np.full(len(x), False) for x in init['indpos']]
     init['outfile'] = [''] * n
-
+    init['mstddev'] = [_read_exthdrs(hdul, 'mstddev', default=0)
+                      for hdul in hduls]
+    
     df = DataFrame(init, index=filenames)
 
     # If any files are asymmetric, treat them all as asymmetric
@@ -187,14 +198,16 @@ def interp_b_nods(atime, btime, bdata, berr):   # pragma: no cover
                     bflux[t, i, j] = np.nan
                     bvar[t, i, j] = np.nan
                 else:
-                    f, e = interp(btime, bf, be, atime[t])
+                    # f, e = interp(btime, bf, be, atime[t])
+                    f, z = interp(btime, bf, be, atime[t])
+                    e, arschlecken = interp(btime, be, bf, atime[t])        #interpolate the error like the flux without squared adding
                     bflux[t, i, j] = f
                     bvar[t, i, j] = e * e
 
     return bflux, bvar
 
 
-def combine_extensions(df, b_nod_method='nearest'):
+def combine_extensions(df, b_nod_method='nearest', bg_scaling=False):
     """
     Find a B nod for each A nod.
 
@@ -246,8 +259,7 @@ def combine_extensions(df, b_nod_method='nearest'):
 
         if not asymmetric:
             bselect = bselect[(bselect['dlam_map'] == arow['dlam_map'])
-                              & (bselect['dbet_map'] == arow['dbet_map'])]
-
+                            & (bselect['dbet_map'] == arow['dbet_map'])]
         # find closest matching B image in time
         if get_two and asymmetric:
             bselect['tsort'] = bselect['mjd'] - arow['mjd']
@@ -284,8 +296,8 @@ def combine_extensions(df, b_nod_method='nearest'):
                     bidx2 = []
 
             describe_a = f"A {os.path.basename(arow.name)} at ext{aidx + 1} " \
-                         f"channel {arow['channel']} indpos {apos} " \
-                         f"dlam {arow['dlam_map']} dbet {arow['dbet_map']}"
+                        f"channel {arow['channel']} indpos {apos} " \
+                        f"dlam {arow['dlam_map']} dbet {arow['dbet_map']}"
             if np.any(bidx):
                 arow['combined'][aidx] = True
                 a_fname = f'FLUX_G{aidx}'
@@ -319,19 +331,30 @@ def combine_extensions(df, b_nod_method='nearest'):
 
                     # get A and B times
                     try:
-                        # unix time at middle of exposure
-                        atime = a_hdr['START'] \
-                            + a_hdr['FIFISTRT'] * a_hdr['ALPHA'] \
-                            + a_hdr['EXPTIME'] / 2.0
-                        btime1 = b_hdr['START'] \
-                            + b_hdr['FIFISTRT'] * b_hdr['ALPHA'] \
-                            + b_hdr['EXPTIME'] / 2.0
-                        btime2 = b2_hdr['START'] \
-                            + b2_hdr['FIFISTRT'] * b2_hdr['ALPHA'] \
-                            + b2_hdr['EXPTIME'] / 2.0
+                        # read number of chop cycles per grating position from 
+                        # header of current file, might change over 
+                        # over observations. Might be overkill, but still correct
+                        if arow['channel'] == 'BLUE': 
+                            a_chpg = a_hdr['C_CYC_B']                            
+                            b_chpg1 = b_hdr['C_CYC_B']
+                            b_chpg2 = b2_hdr['C_CYC_B']
+                        else:
+                            a_chpg =  a_hdr['C_CYC_R']
+                            b_chpg1 = b_hdr['C_CYC_R']
+                            b_chpg2 = b2_hdr['C_CYC_R']
+
+                        # unix time at middle of grating position, each time looking from A file 
+                        # --> 3x adix as base as current A nod is reference 
+
+                        atime = _unix(a_hdr['DATE-OBS']) \
+                            + (aidx + 0.5)*((a_hdr['C_CHOPLN']*2/250)*a_chpg)
+                        btime1 = _unix(b_hdr['DATE-OBS']) \
+                            + (aidx + 0.5)*((b_hdr['C_CHOPLN']*2/250)*b_chpg1)
+                        btime2 = _unix(b2_hdr['DATE-OBS']) \
+                            + (aidx + 0.5)*((b2_hdr['C_CHOPLN']*2/250)*b_chpg2)
+                        
                     except KeyError:
-                        raise ValueError('Missing START, FIFISTRT, ALPHA, '
-                                         'or EXPTIME keys in headers.')
+                        raise ValueError('Missing DATE-OBS, C_CHOPLN or C_CYC keys in headers.')
 
                     # get index for second B row
                     bgidx2 = np.nonzero(bidx2)[0][0]
@@ -340,14 +363,49 @@ def combine_extensions(df, b_nod_method='nearest'):
                     if b_nod_method == 'interpolate':
                         # debug message
                         msg = f'Interpolating B {bfile} at {btime1} ' \
-                              f'and {bfile2} at {btime2} ' \
-                              f'to A time {atime} and subbing from '
+                            f'and {bfile2} at {btime2} ' \
+                            f'to A time {atime} and subbing from '
 
-                        # interpolate background to header atime
-                        b_background = \
-                            np.interp(atime, [btime1, btime2],
-                                      [b_background, brow2['bglevl'][bgidx2]])
 
+                        # average over possibly 4 background files
+                        # grab the first max two entries of bselect, which is already sorted to tsort
+                        closest_before_files = bselect.iloc[:2]
+                        closest_after_files = after.iloc[:2]
+                        # Condition to filter rows
+                        condition_bef = abs(closest_before_files['tsort']) < 3 / (24 * 60)
+                        condition_aft = abs(closest_after_files['tsort']) < 3 / (24 * 60)
+                        before_filtered = closest_before_files[condition_bef]
+                        after_filtered = closest_after_files[condition_aft]
+                        # only take an equal number of files (one or two of each) before and after A Nod  
+                        # to avoid a biased calculation of the background 
+                        if len(before_filtered) < 2:
+                            after_filtered_c = after_filtered.iloc[:1]
+                            before_filtered_c = before_filtered                            
+                        elif len(after_filtered) < 2:
+                            before_filtered_c = before_filtered.iloc[:1]
+                            after_filtered_c = after_filtered
+                        else:
+                            before_filtered_c = before_filtered
+                            after_filtered_c = after_filtered
+
+                        concat_df = pd.concat([before_filtered_c, after_filtered_c])                      
+                       
+                        # weighted average
+                        bglevl = np.array([item[0] for item in concat_df['bglevl']])
+                        mstddev = np.array([item[0] for item in concat_df['mstddev']])
+                        weights = 1/(mstddev*mstddev)
+                        b_background = np.average(bglevl, weights=weights) 
+
+                        
+                        # # average over two background files
+                        # b_background += brow2['bglevl'][bgidx2]
+                        # b_background /= 2.
+
+                        # # interpolate background to header atime
+                        # b_background = \
+                        #     np.interp(atime, [btime1, btime2],
+                        #               [b_background, brow2['bglevl'][bgidx2]])
+                        # average background
                         # UNIX time is a range of values for OTF data:
                         # retrieve from RAMPSTRT and RAMPEND keys
                         a_hdu_hdr = arow['hdul'][a_fname].header
@@ -370,7 +428,7 @@ def combine_extensions(df, b_nod_method='nearest'):
                         b_sname = f'STDDEV_G{bgidx2}'
                         bdata = np.array([b_flux, brow2['hdul'][b_fname].data])
                         berr = np.array([np.sqrt(b_var),
-                                         brow2['hdul'][b_sname].data])
+                                        brow2['hdul'][b_sname].data])
                         b_flux, b_var = \
                             interp_b_nods(atime, btime, bdata, berr)
 
@@ -381,7 +439,7 @@ def combine_extensions(df, b_nod_method='nearest'):
                     else:
                         # debug message
                         msg = f'Averaging B {bfile} and {bfile2} ' \
-                              f'and subbing from '
+                            f'and subbing from '
 
                         # average flux
                         b_flux += brow2['hdul'][b_fname].data
@@ -410,10 +468,18 @@ def combine_extensions(df, b_nod_method='nearest'):
                 # For other modes, A and B are both spexels x spaxels.
 
                 flux = arow['hdul'][a_fname].data
-                stddev = arow['hdul'][a_sname].data ** 2 + b_var
+                stddev = arow['hdul'][a_sname].data ** 2 + b_var             
+                              
                 if asymmetric:
-                    flux -= b_flux
+                    # Optional background scaling for unchopped observations
+                    if bg_scaling and a_hdr['C_AMP']==0:
+                        a_background = arow['bglevl'][aidx]
+                        flux -= b_flux*a_background/b_background
+                    else:
+                        flux -= b_flux
                 else:
+                    # b_flux from source is negative for symmetric chops
+                    # as result of subtract chops
                     flux += b_flux
                     # divide by two for doubled source
                     flux /= 2
@@ -434,11 +500,11 @@ def combine_extensions(df, b_nod_method='nearest'):
 
                 exthead = arow['hdul'][a_fname].header
                 hdinsert(exthead, 'BGLEVL_B', b_background,
-                         comment='BG level nod B (ADU/s)')
+                        comment='BG level nod B (ADU/s)')
                 combined_hdul.append(fits.ImageHDU(flux, header=exthead,
-                                                   name=a_fname))
+                                                name=a_fname))
                 combined_hdul.append(fits.ImageHDU(stddev, header=exthead,
-                                                   name=a_sname))
+                                                name=a_sname))
 
                 # add in scanpos table from A nod if present
                 a_pname = f'SCANPOS_G{aidx}'
@@ -455,7 +521,7 @@ def combine_extensions(df, b_nod_method='nearest'):
 
 
 def combine_nods(filenames, offbeam=False, b_nod_method='nearest',
-                 outdir=None, write=False):
+                 outdir=None, write=False, bg_scaling = False):
     """
     Combine nods of ramp-fitted, chop-subtracted data.
 
@@ -553,7 +619,7 @@ def combine_nods(filenames, offbeam=False, b_nod_method='nearest',
         log.error("Problem in file classification")
         return
 
-    df = combine_extensions(df, b_nod_method=b_nod_method)
+    df = combine_extensions(df, b_nod_method=b_nod_method, bg_scaling=bg_scaling)
 
     for filename, row in df[df['nodbeam'] == 'A'].iterrows():
 

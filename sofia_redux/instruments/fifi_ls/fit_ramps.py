@@ -12,6 +12,7 @@ from astropy.time import Time
 import bottleneck as bn
 import numba as nb
 import numpy as np
+from scipy.stats import linregress
 
 from sofia_redux.instruments.fifi_ls.get_badpix \
     import get_badpix, clear_badpix_cache
@@ -217,7 +218,7 @@ def resize_data(data, readout_range, indpos, remove_first_ramps=True,
 
 
 @nb.njit(cache=True, nogil=False, parallel=False, fastmath=False)
-def calculate_fit(data, maxidx):   # pragma: no cover
+def calculate_fit(data, maxidx, rmplngth):   # pragma: no cover
 
     ramps_per_spaxel, nramp, nwave, nspaxel = data.shape
     mat = np.empty((nramp, 2), dtype=nb.int64)
@@ -248,7 +249,8 @@ def calculate_fit(data, maxidx):   # pragma: no cover
                 idx = maxidx[i, j, k]
                 if idx == 0 or idx == (nramp - 1):
                     idx = nramp
-                elif idx <= 2:
+                # rmlength is 27 for "full ramps only" option, otherwise 2
+                elif idx <= rmplngth:
                     slopes[i, j, k] = np.nan
                     var[i, j, k] = np.nan
                     continue
@@ -273,7 +275,7 @@ def calculate_fit(data, maxidx):   # pragma: no cover
     return slopes, var
 
 
-def fit_data(data, s2n=10, threshold=5, allow_zero_variance=True,
+def fit_data(data, rmplngth, s2n=10, threshold=5, allow_zero_variance=True,
              average_ramps=True, bad_ramps=None):
     """
     Applies linear fit (y = ax + b) over the second dimension of a 4D array.
@@ -309,13 +311,14 @@ def fit_data(data, s2n=10, threshold=5, allow_zero_variance=True,
     -------
     numpy.ndarray, numpy.ndarray
         flux and standard deviation arrays of size (spexel, spaxel)
-        or (16, 25) for FIFI-LS.
+        or (16, 25) for FIFI-LS chopped observations. For OTF, the size
+        is (ramps/spaxel, spexel, spaxel)
     """
 
     maxidx = bn.nanargmax(data, axis=1)
     if bad_ramps is not None:
         maxidx[bad_ramps] = -1
-    slopes, var = calculate_fit(data, maxidx)
+    slopes, var = calculate_fit(data, maxidx, rmplngth)
 
     with warnings.catch_warnings():
         warnings.simplefilter('ignore', RuntimeWarning)
@@ -334,13 +337,57 @@ def fit_data(data, s2n=10, threshold=5, allow_zero_variance=True,
     if average_ramps:
         return flux, np.sqrt(mvar)
     else:
-        # still flag outliers
+        # data.shape : (ramps/spaxel, ramplength, nwave(16), ns(slopespaxel(25))
+        #ramps_per_spaxel, nramp, nwave, nspaxel = data.shape             
+          
+        # flag outliers from meancomb before calculating the variance
         slopes[~info['mask']] = np.nan
         var[~info['mask']] = np.nan
-        return slopes, np.sqrt(var)
+
+         # 1st order linear fit
+        nr, nspe, nspa = slopes.shape
+        # reshape into ramps, pixel for easier thinking
+        slopes_r = np.reshape(slopes,(nr,nspe*nspa))  
+        # Create arrays to store the coefficients and the fitted data for each pixel
+        coefficients = np.zeros((nspe*nspa, 2))  # 2 for slope and intercept
+        fitted_data = np.zeros_like(slopes_r)
+
+        # Loop over each pixel and perform a linear fit over the ramps
+        for i in range(nspe*nspa):
+            valid_mask = ~np.isnan(slopes_r[:, i])  # Create a mask for non-NaN values
+            x = np.arange(nr)[valid_mask]
+            y = slopes_r[:, i][valid_mask]
+            # get rid of empty pixels 
+            
+            # Empty pixels, i.e., pixels with no valid data points (all NaNs), will have 
+            # coefficients set to [0, 0] and fitted_data will remain all zeros. This is 
+            # because when there are no valid data points to perform the linear fit, 
+            # linregress will return slope and intercept values of zero. We handle this 
+            # situation by checking if len(x) > 0, which ensures that there is at least 
+            # one valid data point to perform the linear fit. Tested by JupyterNotebook 
+            # snippet.
+            if len(x) > 0:
+                slope, intercept, _, _, _ = linregress(x, y)
+                coefficients[i] = [slope, intercept]
+                fitted_data[:, i] = slope * np.arange(nr) + intercept
+
+        # get the difference between the fitted data and original data while reshaping back to 
+        # ramps, spexel, spaxel        
+        diff = np.reshape(slopes_r,(nr,nspe,nspa)) - np.reshape(fitted_data,(nr,nspe,nspa))
+        # Calculate variance over slopes
+        svar = np.nanvar(diff,0)
+        # np.nan_to_num(svar, copy=False, nan=0.0)
+        for k in nb.prange(data.shape[0]):           #prange: loop can be parallised 
+            for i in range(data.shape[2]):
+                for j in range(data.shape[3]):
+                    if not np.isnan(var[k, i, j]) and not np.isnan(svar[i, j]):
+                        var[k, i, j] = np.sqrt((var[k, i, j] * var[k, i, j]) + (svar[i, j] * svar[i, j]))
+                            
+        sqrt_var =  np.where(np.isnan(var), np.nan, np.sqrt(var))
+        return slopes, sqrt_var
 
 
-def process_extension(hdu, readout_range, threshold=5,
+def process_extension(hdu, readout_range, rmplngth, threshold=5,
                       s2n=10, remove_first=None,
                       subtract_bias=True, badmask=None,
                       average_ramps=True, posdata=None,
@@ -407,9 +454,10 @@ def process_extension(hdu, readout_range, threshold=5,
     nread = readout_range[1]
 
     # fit slopes to ramps, average if desired
+    # Different dimensions for different OBS Modes!!!
     flux, stddev = fit_data(flux, s2n=s2n, threshold=threshold,
                             average_ramps=average_ramps,
-                            bad_ramps=bad_ramps)
+                            bad_ramps=bad_ramps, rmplngth=rmplngth)
 
     # apply bad mask to spaxels/spexels
     if isinstance(badmask, np.ndarray):
@@ -449,7 +497,7 @@ def process_extension(hdu, readout_range, threshold=5,
                      'UNIX time of last ramp [s]')
 
             # new table with only good ramp-averaged position data
-            # todo: consider averaging spatially local ramps as well
+            # todo: consider averaging spatially local ramps as well -> Christian says don't do it
             pdata = Table()
             for name in ['DLAM_MAP', 'DBET_MAP']:
                 reshaped = posdata[name].reshape(newshape)
@@ -467,6 +515,10 @@ def process_extension(hdu, readout_range, threshold=5,
     mflux = 0.0 if np.isnan(flux).all() else np.nanmean(flux)
     hdinsert(image_hdr, 'BGLEVL_A', mflux,
              comment='BG level nod A (ADU/s)')
+    # add a bg level header keyword
+    mstddev = 0.0 if np.isnan(stddev).all() else np.nanmean(stddev)
+    hdinsert(image_hdr, 'MSTDDEV', mstddev,
+             comment='Mean STDDEV (ADU/s)')
 
     name = image_hdr['EXTNAME']
     image_hdr['BUNIT'] = 'adu/s'
@@ -480,7 +532,7 @@ def process_extension(hdu, readout_range, threshold=5,
         return hdu1, hdu2
 
 
-def fit_ramps(filename, s2n=10, threshold=5, badpix_file=None,
+def fit_ramps(filename, rmplngth, s2n=10, threshold=5, badpix_file=None,
               write=False, outdir=None, remove_first=True,
               subtract_bias=True, indpos_sigma=3.0):
     """
@@ -610,7 +662,7 @@ def fit_ramps(filename, s2n=10, threshold=5, badpix_file=None,
             s2n=s2n, remove_first=remove_first,
             subtract_bias=subtract_bias, badmask=badmask,
             average_ramps=average_ramps, posdata=posdata,
-            indpos_sigma=indpos_sigma)
+            indpos_sigma=indpos_sigma, rmplngth=rmplngth)
         if ext is None:
             log.error("Failed to process extension %i: %s" %
                       (idx + 1, filename))
@@ -644,7 +696,7 @@ def fit_ramps_wrap_helper(_, kwargs, filename):
 def wrap_fit_ramps(files, s2n=30, threshold=5, badpix_file=None,
                    outdir=None, remove_first=True, subtract_bias=True,
                    indpos_sigma=3.0, allow_errors=False,
-                   write=False, jobs=None):
+                   write=False, jobs=None, rmplngth = 2):
     """
     Wrapper for fit_ramps over multiple files.
 
@@ -688,7 +740,7 @@ def wrap_fit_ramps(files, s2n=30, threshold=5, badpix_file=None,
         's2n': s2n, 'threshold': threshold, 'badpix_file': badpix_file,
         'outdir': outdir, 'remove_first': remove_first,
         'subtract_bias': subtract_bias, 'indpos_sigma': indpos_sigma,
-        'write': write}
+        'write': write, 'rmplngth': rmplngth}
 
     if DEBUG:  # pragma: no cover
         jobs = 1
