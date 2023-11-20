@@ -1,5 +1,14 @@
-1.3.2
-=====
+1.3.3  (2023-08-06)
+===================
+- Updated FIFI-LS pipeline to v2.8.0, including separate spatial flats for
+  each dichroic.
+- Updated calibration files for HAWC, FORCAST, and EXES for prior cycles with
+  new analysis from data reprocessing efforts.
+- Minor updates for compatibility with third-party dependency changes.
+- Update packaging for PEP compliance.
+
+1.3.2 (2023-03-29)
+==================
 - Minor bug fixes for EXES edge cases (raster flats with non-standard
   overlaps; occasional spurious zero-length orders).
 - Updated calibration files for EXES.

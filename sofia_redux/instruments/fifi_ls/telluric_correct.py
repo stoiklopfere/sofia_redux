@@ -17,6 +17,7 @@ from sofia_redux.toolkit.utilities \
 
 __all__ = ['apply_atran', 'telluric_correct', 'wrap_telluric_correct']
 
+
 @nb.njit(cache=True, nogil=False, parallel=False, fastmath=False)
 def apply_atran_correction(wave, data, var, atran, cutoff, transmission_narrow, narrow):  # pragma: no cover
     """

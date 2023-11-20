@@ -408,7 +408,7 @@ def sincinterp(x, y, xout, dampfac=3.25, ksize=21,
     return yout
 
 
-@nb.njit(fastmath=True, cache=True, nogil=True)
+@nb.njit(cache=True, nogil=False, parallel=False, fastmath=False)
 def interp_1d_point(x, y, xout):  # pragma: no cover
     """
     Perform linear interpolation at a single point. `x` must be monotonically
@@ -464,7 +464,7 @@ def interp_1d_point(x, y, xout):  # pragma: no cover
     return ly + (weight * dy)
 
 
-@nb.njit(fastmath=True, cache=True, nogil=True)
+@nb.njit(cache=True, nogil=False, parallel=False, fastmath=False)
 def interp_1d_point_with_error(x, y, error, xout):  # pragma: no cover
     """
     Perform linear interpolation at a single point with error propagation.
@@ -644,7 +644,7 @@ def interp_error_nd(points, error, xi, cval=np.nan):
     if not mask.any():
         return result
 
-    vertices = tri.vertices[simplices[mask]]
+    vertices = tri.simplices[simplices[mask]]
 
     if not hasattr(error, '__len__'):
         error = to_array_shape(float(error), np.max(vertices) + 1)
@@ -661,7 +661,7 @@ def interp_error_nd(points, error, xi, cval=np.nan):
         mask[same] = False
         if not mask.any():
             return result
-        vinds = tri.vertices[simplices[mask]]
+        vinds = tri.simplices[simplices[mask]]
 
     else:
         vinds = vertices

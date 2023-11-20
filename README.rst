@@ -22,8 +22,7 @@ high resolution spectrometer.
 SOFIA raw and processed data can be accessed from the
 `SOFIA archive <https://irsa.ipac.caltech.edu/applications/sofia/>`__.
 Archived data may not match the results of data processed
-with this pipeline software.  Questions specific to particular data sets
-should be directed to the `SOFIA helpdesk <sofia_help@sofia.usra.edu>`__.
+with this pipeline software.
 
 SOFIA pipelines are developed internally by the USRA/SOFIA data processing
 software team, then are published publicly at the
@@ -52,4 +51,4 @@ This package is also based upon the
 `Astropy package template <https://github.com/astropy/package-template>`_
 which is licensed under the BSD 3-clause license.
 
-See the licenses folder for more information.
+See the LICENSE.rst for more information.
