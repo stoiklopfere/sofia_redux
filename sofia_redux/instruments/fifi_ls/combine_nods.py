@@ -233,6 +233,10 @@ def combine_extensions(df, b_nod_method='nearest', bg_scaling=False):
     -------
     list of fits.HDUList
     """
+
+    print('=========================')
+    print('CHristians Pipe hier!')
+    print('=========================')
     # check B method parameter
     if b_nod_method not in ['nearest', 'average', 'interpolate']:
         raise ValueError("Bad b_nod_method: should be 'nearest', "
@@ -367,39 +371,39 @@ def combine_extensions(df, b_nod_method='nearest', bg_scaling=False):
                             f'to A time {atime} and subbing from '
 
 
-                        # average over possibly 4 background files
-                        # grab the first max two entries of bselect, which is already sorted to tsort
-                        closest_before_files = bselect.iloc[:2]
-                        closest_after_files = after.iloc[:2]
-                        # Condition to filter rows
-                        condition_bef = abs(closest_before_files['tsort']) < 3 / (24 * 60)
-                        condition_aft = abs(closest_after_files['tsort']) < 3 / (24 * 60)
-                        before_filtered = closest_before_files[condition_bef]
-                        after_filtered = closest_after_files[condition_aft]
-                        # only take an equal number of files (one or two of each) before and after A Nod  
-                        # to avoid a biased calculation of the background 
-                        if len(before_filtered) < 2:
-                            after_filtered_c = after_filtered.iloc[:1]
-                            before_filtered_c = before_filtered                            
-                        elif len(after_filtered) < 2:
-                            before_filtered_c = before_filtered.iloc[:1]
-                            after_filtered_c = after_filtered
-                        else:
-                            before_filtered_c = before_filtered
-                            after_filtered_c = after_filtered
+                        # # average over possibly 4 background files
+                        # # grab the first max two entries of bselect, which is already sorted to tsort
+                        # closest_before_files = bselect.iloc[:1]
+                        # closest_after_files = after.iloc[:1]
+                        # # Condition to filter rows
+                        # condition_bef = abs(closest_before_files['tsort']) < 3 / (24 * 60)
+                        # condition_aft = abs(closest_after_files['tsort']) < 3 / (24 * 60)
+                        # before_filtered = closest_before_files[condition_bef]
+                        # after_filtered = closest_after_files[condition_aft]
+                        # # only take an equal number of files (one or two of each) before and after A Nod  
+                        # # to avoid a biased calculation of the background 
+                        # if len(before_filtered) < 2:
+                        #     after_filtered_c = after_filtered.iloc[:1]
+                        #     before_filtered_c = before_filtered                            
+                        # elif len(after_filtered) < 2:
+                        #     before_filtered_c = before_filtered.iloc[:1]
+                        #     after_filtered_c = after_filtered
+                        # else:
+                        #     before_filtered_c = before_filtered
+                        #     after_filtered_c = after_filtered
 
-                        concat_df = pd.concat([before_filtered_c, after_filtered_c])                      
+                        # concat_df = pd.concat([before_filtered_c, after_filtered_c])                      
                        
-                        # weighted average
-                        bglevl = np.array([item[0] for item in concat_df['bglevl']])
-                        mstddev = np.array([item[0] for item in concat_df['mstddev']])
-                        weights = 1/(mstddev*mstddev)
-                        b_background = np.average(bglevl, weights=weights) 
+                        # # weighted average
+                        # bglevl = np.array([item[0] for item in concat_df['bglevl']])
+                        # mstddev = np.array([item[0] for item in concat_df['mstddev']])
+                        # weights = 1/(mstddev*mstddev)
+                        # b_background = np.average(bglevl, weights=weights) 
 
                         
                         # # average over two background files
-                        # b_background += brow2['bglevl'][bgidx2]
-                        # b_background /= 2.
+                        b_background += brow2['bglevl'][bgidx2]
+                        b_background /= 2.
 
                         # # interpolate background to header atime
                         # b_background = \
