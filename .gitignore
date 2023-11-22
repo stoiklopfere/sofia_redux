@@ -72,59 +72,21 @@ pip-wheel-metadata/
 
 # test data
 sofia_redux/instruments/fifi_ls/tests/data/*fits
-# startup file for git environment
-startup.py
+sofia_redux/instruments/fifi_ls/data/*
 
-# test and plot files
-plot_files_in_dir.py
-
-# general data
-**/data/*
-*log
-sofia_redux/instruments/fifi_ls/zeug
-sofia_redux/instruments/fifi_ls/combine_nods_spieli.py
-sofia_redux/instruments/fifi_ls/FIFI-LS_ramps.ipynb
-sofia_redux/instruments/fifi_ls/tests/values.csv
-ramp_Lengths_O3.csv
-startup_pipe.py
-uniques
-sofia_redux/instruments/fifi_ls/FIFI-LS_neu.ipynb
-sofia_redux/instruments/fifi_ls/FIFI-LS.ipynb:Zone.Identifier
-sofia_redux/instruments/fifi_ls/fit_ramps_clean.py
-sofia_redux/instruments/fifi_ls/fit_ramps_spieli.py
-sofia_redux/instruments/fifi_ls/plot.png
-sofia_redux/instruments/fifi_ls/values.csv
-
-sofia_redux/instruments/fifi_ls/tests/test_combine_nods.py
-sofia_redux/instruments/fifi_ls/redu
-sofia_redux/instruments/fifi_ls/# Question.md
-sofia_redux/instruments/fifi_ls/FIFI-LS_Dario.ipynb
-sofia_redux/instruments/fifi_ls/tests/test_combine_nods.py
-Background_linfit.png
-Bckgorunds.png
-Linfit_pixel55.png
-linfit_pixel346.png
-linfit_spex_spax.png
-output.png
-telluric_single.png
-telluric_singlefile_full.png
-telluric_singlefile_xlim.png
-sofia_redux/instruments/fifi_ls/atran.ipynb
-sofia_redux/instruments/fifi_ls/CII_Full_interpAtranFile_0.2.csv
-sofia_redux/instruments/fifi_ls/CII_full_nearestAtranFile_0.2.csv
-sofia_redux/instruments/fifi_ls/CII_part_interpAtranFile_0.2.csv
-sofia_redux/instruments/fifi_ls/CII_part_nearestAtranFile_0.6.csv
-sofia_redux/instruments/fifi_ls/OIII_Full_interpAtranFile_0.2.csv
-sofia_redux/instruments/fifi_ls/rows_old_b1.csv
-sofia_redux/instruments/fifi_ls/rows_old_b2.csv
-sofia_redux/instruments/fifi_ls/values_new.csv
-sofia_redux/instruments/fifi_ls/combine_nods_christian.py
-sofia_redux/instruments/fifi_ls/fit_ramps _linfit.py
-sofia_redux/instruments/fifi_ls/fit_ramps _nans_linfit.py
-sofia_redux/instruments/fifi_ls/fit_ramps_nans.py
-sofia_redux/instruments/fifi_ls/output.txt
-sofia_redux/instruments/fifi_ls/sel_output_old.txt
-sofia_redux/instruments/fifi_ls/slopes_fit.ipynb
-sofia_redux/instruments/fifi_ls/tests/test_combine_nods.py
-sofia_redux/instruments/fifi_ls/nods.ipynb
-sofia_redux/instruments/fifi_ls/conftest.py:Zone.Identifier
+# Parameter Files
+2_redux_infiles_63OI_1nod_win.txt
+2_redux_infiles_63OI_win.txt
+2_redux_infiles_Asy_win.txt
+2_redux_infiles_CII_1nod_win.txt
+2_redux_infiles_CII_short_win.txt
+2_redux_infiles_CII_sorted_Christian_win.txt
+2_redux_infiles_CII_sorted_win.txt
+2_redux_infiles_M82_CII.cfg
+2_redux_infiles_OIII_1nod_win.txt
+2_redux_infiles_OIII_sorted_win.txt
+2_redux_param_interpolate_win.cfg
+2_redux_param_LMC-CII_current_best_newpipe_recipe.cfg
+2_redux_param_LMC-CII_current_best_newpipe.cfg
+sofia_redux/instruments/fifi_ls/data/badpix_files/badpixels_201707_b.txt
+sofia_redux/instruments/fifi_ls/data/badpix_files/badpixels_201707_b.txt
